@@ -1,0 +1,216 @@
+Google Pay Android Integration
+=================================
+(link for Google Doc: https://docs.google.com/document/d/1AdJWa2KWrCTTEtCjHh3lN3kdr7XQngz7QBeahGNs158/edit?usp=sharing)
+
+# Before you get started, review the following prerequisites:
+
+1. Your device must have Google Play services version 16.0.0 or greater installed
+2. Install the Google Pay app and add a payment method
+3. Add a payment method to Google
+4. Adhere to our Google Pay API Acceptable Use Policy and the Google Play developer policy
+
+# If you are implementing a payment button in your app for one of the following scenarios:
+
+1. Have Google process payments for you
+2. Sell digital goods such as movies or games
+
+Step 1: open the build.gradle file in the app module and add the following to the dependencies block:
+
+dependencies {
+   implementation 'com.google.android.gms:play-services-wallet:16.0.0'
+   implementation 'com.android.support:appcompat-v7:24.1.1'
+}
+
+Step 2: Modify your Manifest
+
+<meta-data
+   android:name="com.google.android.gms.wallet.api.enabled"
+   android:value="true" />
+
+Step 3: Define your Google Pay API version
+
+Declare the version of the Google Pay API that your app uses. The major and minor version affects the fields expected in each passed object and is included in the response.
+Create a base request object that contains properties that are present in all other request objects.
+
+
+private static JSONObject getBaseRequest() {
+ return new JSONObject()
+   .put("apiVersion", 2)
+   .put("apiVersionMinor", 0);
+}
+
+Step 4: Choose a payment tokenization method.
+
+Google encrypts information about a payer's selected card for secure processing by a supported gateway or directly on a merchant's secured servers. (Replace the abbreviated publicKey value with a public key you provided in your Google Pay Developer Profile to receive payment information encrypted with that key.)
+
+JSONObject tokenizationSpecification = new JSONObject();
+ tokenizationSpecification.put("type", "DIRECT");
+ tokenizationSpecification.put(
+     "parameters",
+     new JSONObject()
+         .put("protocolVersion", "ECv1")
+         .put("publicKey", "BOdoXP1aiNp.....kh3JUhiSZKHYF2Y="));
+
+ return tokenizationSpecification;
+
+Step 5: Define supported payment card networks
+
+Define the card networks that your app accepts.
+		private static JSONArray getAllowedCardNetworks() {
+ return new JSONArray()
+     .put("AMEX")
+     .put("DISCOVER")
+     .put("JCB")
+     .put("MASTERCARD")
+     .put("VISA");
+}
+
+The Google Pay API may return cards on file on Google.com (PAN_ONLY) and/or a device token on an Android device authenticated with a 3-D Secure cryptogram (CRYPTOGRAM_3DS).
+
+private static JSONArray getAllowedCardAuthMethods() {
+ return new JSONArray()
+     .put("PAN_ONLY")
+     .put("CRYPTOGRAM_3DS");
+}
+
+Step 6: Describe your allowed payment methods
+
+Combine your supported authentication methods and supported card networks in order to describe your app's support for the CARD payment method.
+
+private static JSONObject getBaseCardPaymentMethod() {
+ JSONObject cardPaymentMethod = new JSONObject();
+ cardPaymentMethod.put("type", "CARD");
+ cardPaymentMethod.put(
+     "parameters",
+     new JSONObject()
+         .put("allowedAuthMethods", getAllowedCardAuthMethods())
+         .put("allowedCardNetworks", getAllowedCardNetworks());
+
+ return cardPaymentMethod;
+}
+
+Extend the base card payment method object to describe information expected to be returned to your application including tokenized payment data.
+
+private static JSONObject getCardPaymentMethod() {
+ JSONObject cardPaymentMethod = getBaseCardPaymentMethod();
+ cardPaymentMethod.put("tokenizationSpecification", getTokenizationSpecification());
+
+ return cardPaymentMethod;
+}
+
+Step 7: Create a PaymentsClient instance
+
+Create an instance of PaymentsClient in the onCreate method in your Activity.
+PaymentsClient is used for interaction with the Google Pay API.
+
+mPaymentsClient =
+     Wallet.getPaymentsClient(
+         this,
+         new Wallet.WalletOptions.Builder()
+             .setEnvironment(WalletConstants.ENVIRONMENT_TEST)
+             .build());
+
+Step 8: Determine readiness to pay with the Google Pay API
+
+Add your allowed payment methods to your base request object with the following code snippet:
+		
+public static function getIsReadyToPayRequest() {
+ JSONObject isReadyToPayRequest = getBaseRequest();
+ isReadyToPayRequest.put(
+   "allowedPaymentMethods",
+   new JSONArray()
+     .put(getBaseCardPaymentMethod()));
+
+ return isReadyToPayRequest;
+}
+
+Call the isReadyToPay API to determine if the user can make payments using the Google Pay API.
+		IsReadyToPayRequest request =
+   IsReadyToPayRequest.fromJson(getIsReadyToPayRequest().toString());
+Task<Boolean> task = mPaymentsClient.isReadyToPay(request);
+task.addOnCompleteListener(
+   new OnCompleteListener<Boolean>() {
+     @Override
+     public void onComplete(@NonNull Task<Boolean> task) {
+       try {
+         boolean result = task.getResult(ApiException.class);
+         if (result) {
+           // show Google Pay as a payment option
+         }
+       } catch (ApiException e) {
+       }
+     }
+   });
+Google Pay should be presented as a payment option after receiving a successful result from the isReadyToPay.
+
+Step 9:  Create a PaymentDataRequest object
+
+A PaymentDataRequest JSON object describes the information you would like to request from a payer in a Google Pay payment sheet.
+
+private static JSONObject getTransactionInfo() {
+ JSONObject transactionInfo = new JSONObject();
+ transactionInfo.put("totalPrice", "12.34");
+ transactionInfo.put("totalPriceStatus", "FINAL");
+ transactionInfo.put("currencyCode", "USD");
+
+ return transactionInfo;
+}
+
+Provide a user-visible merchant name.
+
+private static JSONObject getMerchantInfo() {
+ return new JSONObject()
+     .put("merchantName", "Example Merchant");
+}
+
+Assign your base request object to a new PaymentDataRequest JSON object. Add the payment methods and
+add information about the transaction and the requesting merchant.
+
+public static JSONObject getPaymentDataRequest() {
+ JSONObject paymentDataRequest = getBaseRequest();
+ paymentDataRequest.put(
+   "allowedPaymentMethods",
+   new JSONArray()
+       .put(getCardPaymentMethod()));
+ paymentDataRequest.put("transactionInfo", getTransactionInfo());
+ paymentDataRequest.put("merchantInfo", getMerchantInfo());
+
+ return paymentDataRequest;
+}
+
+Step 10: Make a Payment
+
+   PaymentDataRequest request = PaymentDataRequest.fromJson(paymentDataRequest.toString());
+                    if (request != null) {
+                      AutoResolveHelper.resolveTask(
+                          mPaymentsClient.loadPaymentData(request),
+                          this,
+                          // LOAD_PAYMENT_DATA_REQUEST_CODE is a constant integer value you define
+                          LOAD_PAYMENT_DATA_REQUEST_CODE); }
+Step 11: Handle the response object
+
+A PaymentData object is returned to onActivityResult after a payer has successfully provided the requested information in the Google Pay payment sheet.
+
+switch (requestCode) {
+     // value passed in AutoResolveHelper
+   case LOAD_PAYMENT_DATA_REQUEST_CODE:
+     switch (resultCode) {
+       case Activity.RESULT_OK:
+         PaymentData paymentData = PaymentData.getFromIntent(data);
+         String json = paymentData.toJson();
+         break;
+       case Activity.RESULT_CANCELED:
+         break;
+       case AutoResolveHelper.RESULT_ERROR:
+         Status status = AutoResolveHelper.getStatusFromIntent(data);
+         // Log the status for debugging.
+         // Generally, there is no need to show an error to the user.
+         // The Google Pay payment sheet will present any account errors.
+         break;
+       default:
+         // Do nothing.
+     }
+     break;
+   default:
+     // Do nothing.
+
